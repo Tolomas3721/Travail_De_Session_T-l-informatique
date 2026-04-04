@@ -8,6 +8,6 @@ s = usocket(
     taux_corruption=0.05,
 )
 
-s.connect(("127.0.0.1", 9999))
+s.connect(("127.0.0.1", 4242))
 s.send(b"segment 1")
 reponse = s.recv(1024)
