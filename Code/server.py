@@ -1,72 +1,9 @@
+import os
 from socket import AF_INET, SOCK_DGRAM
 from usocket import usocket
 
-import struct
-import configparser
-import zlib
-import os
+from packet_helper import *
 
-
-config = configparser.ConfigParser()
-config.read("config.ini")
-
-TIMEOUT = float(config["RESEAU"]["timeout"])
-WINDOW_SIZE = int(config["CONNEXION"]["n_propose"])
-
-SERVER_PORT = 4242
-FIABILITE = float(config["RESEAU"]["fiabilite"])
-MAX_REPRISES = int(config["RESEAU"]["max_reprises"])
-TAUX_CORRUPTION = float(config["RESEAU"]["taux_corruption"])
-
-# pas sur ce qui est utile de load ici, donc je load tout lol
-client_mss_propose = int(config["CONNEXION"]["client_mss_propose"])
-server_mss_propose = int(config["CONNEXION"]["serveur_mss_propose"])
-
-
-
-SAVE_DIR = "./sauvegardes"
-
-HEADER_FMT = "!BBIIHI"
-HEADER_SIZE = struct.calcsize(HEADER_FMT)
-
-VERSION = 1
-
-TYPE_SYN = 1
-TYPE_SYN_ACK = 2
-TYPE_ACK = 3
-TYPE_DATA = 4
-TYPE_FIN = 5
-TYPE_CMD = 6
-
-
-
-def make_checksum(data: bytes) -> int:
-    return zlib.crc32(data) & 0xffffffff
-
-
-def build_packet(msg_type, seq, ack, data=b"") -> bytes:
-    data_len = len(data)
-    checksum = make_checksum(data)
-    header = struct.pack(HEADER_FMT, VERSION, msg_type, seq, ack, data_len, checksum)
-    return header + data
-
-
-def parse_packet(packet: bytes) -> dict | None:
-    header = packet[:HEADER_SIZE]
-    data = packet[HEADER_SIZE:]
-
-    version, msg_type, seq, ack, data_len, checksum = struct.unpack(HEADER_FMT, header)
-
-    if make_checksum(data) != checksum:
-        # corrompu, il faut checker quand on appel
-        return None
-
-    return {
-        "type": msg_type,
-        "seq": seq,
-        "ack": ack,
-        "data": data
-    }
 
 
 class Server:
@@ -129,41 +66,38 @@ class Server:
         while True:
             try:
                 data, addr = self.sock.recvfrom(65536)
-                packet = parse_packet(data)
-
-                if not packet:
-                    continue  # corrupted
-
-                if packet["type"] == TYPE_DATA:
-                    seq = packet["seq"]
-
-                    # duplicate check
-                    if seq in self.received:
-                        continue
-
-                    # store
-                    self.received[seq] = packet["data"]
-
-                    # update expected_seq (Go-Back-N style)
-                    while self.expected_seq in self.received:
-                        self.expected_seq += 1
-
-                    # send ACK every WINDOW_SIZE
-                    if seq % WINDOW_SIZE == 0:
-                        ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq - 1)
-                        self.sock.sendto(ack_packet, addr)
-
-                elif packet["type"] == TYPE_FIN:
-                    print("Transfère complété")
-                    self.save_file()
-                    return
-
-                elif packet["type"] == TYPE_CMD:
-                    self.handle_command(packet)
-
             except Exception:
-                # timeout, just continue waiting
+                # TODO: timeout
                 continue
+            
+            packet = parse_packet(data)
+
+            if not packet:
+                continue  # TODO: corrompu
+
+            if packet["type"] == TYPE_DATA:
+                seq = packet["seq"]
+
+                if seq in self.received:
+                    continue
+
+                self.received[seq] = packet["data"]
+
+                while self.expected_seq in self.received:
+                    self.expected_seq += 1
+
+                if seq % WINDOW_SIZE == 0:
+                    ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq - 1)
+                    self.sock.sendto(ack_packet, addr)
+
+            elif packet["type"] == TYPE_FIN:
+                print("Transfère complété")
+                self.save_file()
+                return
+
+            elif packet["type"] == TYPE_CMD:
+                self.handle_command(packet)
+
 
     def save_file(self):
         filename = os.path.join(SAVE_DIR, "received_file")
