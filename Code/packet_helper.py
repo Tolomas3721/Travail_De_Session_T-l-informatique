@@ -41,25 +41,25 @@ def checksum(data: bytes) -> int:
     return zlib.crc32(data) & 0xffffffff
 
 
-def build_packet(msg_type, seq, ack, payload=b""):
-    payload_len = len(payload)
-    chk = checksum(payload)
-    header = struct.pack(HEADER_FMT, VERSION, msg_type, seq, ack, payload_len, chk)
-    return header + payload
+def build_packet(msg_type, seq, ack, data=b""):
+    data_len = len(data)
+    chk = checksum(data)
+    header = struct.pack(HEADER_FMT, VERSION, msg_type, seq, ack, data_len, chk)
+    return header + data
 
 
 def parse_packet(packet: bytes):
     header = packet[:HEADER_SIZE]
-    payload = packet[HEADER_SIZE:]
+    data = packet[HEADER_SIZE:]
 
-    version, msg_type, seq, ack, payload_len, chk = struct.unpack(HEADER_FMT, header)
+    version, msg_type, seq, ack, data_len, chk = struct.unpack(HEADER_FMT, header)
 
-    if checksum(payload) != chk:
-        return None  # TODO: corompu
+    if checksum(data) != chk:
+        return None  # TODO: corrompu
 
     return {
         "type": msg_type,
         "seq": seq,
         "ack": ack,
-        "payload": payload
+        "data": data
     }

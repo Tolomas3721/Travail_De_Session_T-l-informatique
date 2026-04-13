@@ -8,76 +8,96 @@ from packet_helper import *
 
 class Client:
     def __init__(self):
-        self.sock = None
-        self.server_addr = None
+        self.sock = usocket(AF_INET, SOCK_DGRAM, fiabilite=FIABILITE, taux_corruption=TAUX_CORRUPTION)
+        self.sock.settimeout(TIMEOUT)
+        self.server_address = None
         self.seq = 0
 
     def open(self, ip):
-        self.sock = usocket()
-        self.sock.settimeout(TIMEOUT)
-        self.server_addr = (ip, SERVER_PORT)
+        self.server_address = (ip, SERVER_PORT)
 
         print("Connexion")
 
         # SYN
-        pkt = build_packet(TYPE_SYN, self.seq, 0)
-        self.sock.sendto(pkt, self.server_addr)
+        for i in range(MAX_REPRISES):
+            packet = build_packet(TYPE_SYN, self.seq, 0)
+            self.sock.sendto(packet, self.server_address)
 
-        # SYN-ACK
-        try:
-            data, _ = self.sock.recvfrom(2048)
-        except Exception:
-            print("Connection failed")
-            return
-        
-        res = parse_packet(data)
-        if res and res["type"] == TYPE_SYN_ACK:
+            # SYN-ACK
+            try:
+                data, _ = self.sock.recvfrom(CLIENT_MSS_PROPOSE + HEADER_SIZE)
+            except Exception:
+                print("Échec de la connexion (Timeout)")
+                continue
+            
+            res = parse_packet(data)
+            if res and res["type"] != TYPE_SYN_ACK:
+                continue
             print("SYN-ACK")
 
             # ACK
             self.seq += 1
-            ack_pkt = build_packet(TYPE_ACK, self.seq, res["seq"])
-            self.sock.sendto(ack_pkt, self.server_addr)
+            ack_packet = build_packet(TYPE_ACK, self.seq, res["seq"])
+            self.sock.sendto(ack_packet, self.server_address)
 
             print("Connected!")
+            return True
+        return False
+            
+    def wait_for_file(self):
+        try:
+            data, _ = self.sock.recvfrom(CLIENT_MSS_PROPOSE + HEADER_SIZE)
+        except Exception:
+            print("Échec de la connexion (Timeout)")
+            return
+        data = parse_packet(data)
+        return data["data"].decode()
 
     def send_command(self, cmd: str):
-        pkt = build_packet(TYPE_CMD, self.seq, 0, cmd.encode())
-        self.sock.sendto(pkt, self.server_addr)
+        packet = build_packet(TYPE_CMD, self.seq, 0, cmd.encode())
+        self.sock.sendto(packet, self.server_address)
+        print("commande envoyée")
+        return self.wait_for_file()
 
-    def send_file(self, filename):
-        if not os.path.exists(filename):
+    def send_file(self, path: str):
+        if not os.path.exists(path):
             print("File not found")
             return
+        
+        _, filename = os.path.split(path)
+        
+        packet = build_packet(TYPE_CMD, self.seq, 0, f"put {filename}".encode())
+        self.sock.sendto(packet, self.server_address)
 
         print(f"Sending {filename}")
 
-        with open(filename, "rb") as f:
-            data = f.read()
+        with open(path, "rb") as file:
+            data = file.read()
 
-        chunks = [data[i:(i + CLIENT_MSS_PROPOSE)] for i in range(0, len(data), CLIENT_MSS_PROPOSE)]
+        chunks = [data[i:(i + SERVER_MSS_PROPOSE)] for i in range(0, len(data), SERVER_MSS_PROPOSE)]
+        print(f"sending {len(chunks)} chunks")
 
         base = 0
         retries = 0
-
+        
         while base < len(chunks):
             window = chunks[base:base + WINDOW_SIZE]
 
             # envoi
             for i, chunk in enumerate(window):
-                pkt = build_packet(TYPE_DATA, base + i, 0, chunk)
-                self.sock.sendto(pkt, self.server_addr)
+                packet = build_packet(TYPE_DATA, base + i, 0, chunk)
+                self.sock.sendto(packet, self.server_address)
 
             # attendre ack
             try:
-                self.sock.settimeout(TIMEOUT)
-                data, _ = self.sock.recvfrom(2048)
-            except Exception:
+                data, _ = self.sock.recvfrom(CLIENT_MSS_PROPOSE + HEADER_SIZE)
+            except TimeoutError:
                 retries += 1
                 print(f"Timeout ({retries})")
 
                 if retries >= MAX_REPRISES:
                     print("Transfère raté")
+                    # TODO: demander de coninuer tranfère
                     return
                 continue
             
@@ -88,10 +108,8 @@ class Client:
                 base = ack + 1
                 retries = 0
 
-            
-
-        fin_pkt = build_packet(TYPE_FIN, self.seq, 0)
-        self.sock.sendto(fin_pkt, self.server_addr)
+        fin_packet = build_packet(TYPE_FIN, self.seq, 0)
+        self.sock.sendto(fin_packet, self.server_address)
 
         print("Fichier envoyé")
 
@@ -105,6 +123,7 @@ class Client:
 def main():
     client = Client()
 
+    is_connected = False
     while True:
         cmd = input(">> ").strip()
 
@@ -113,14 +132,21 @@ def main():
         # only put it when the command has params
         if cmd.startswith("open "):
             _, ip = cmd.split()
-            client.open(ip)
+            if client.open(ip):
+                is_connected = True
 
         elif cmd.startswith("put "):
-            _, filename = cmd.split()
-            client.send_file(filename)
+            if is_connected:
+                _, filename = cmd.split(' ')
+                client.send_file(filename)
+            else:
+                print("Vous n'êtes pas connecté au serveur!")
 
         elif cmd == "ls":
-            client.send_command("ls")
+            if is_connected:
+                print(client.send_command("ls"))
+            else:
+                print("Vous n'êtes pas connecté au serveur!")
 
         elif cmd == "bye":
             client.close()

@@ -8,7 +8,7 @@ from packet_helper import *
 
 class Server:
     def __init__(self):
-        self.sock = usocket(AF_INET, SOCK_DGRAM, fiabilite=FIABILITE, taux_corruption=TAUX_CORRUPTION)
+        self.sock = usocket(AF_INET, SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", SERVER_PORT))
         self.sock.settimeout(TIMEOUT)
 
@@ -62,22 +62,17 @@ class Server:
         self.sock.sendto(res_packet, self.client_address)
         print("réponse envoyée")
 
-    def receive_file(self, filename: str):
+    def receive_file(self):
         print("Réception du fichier")
 
         self.expected_seq = 0
         self.received = {}
-        
-        reprises = 0
 
         while True:
             try:
                 data, address = self.sock.recvfrom(SERVER_MSS_PROPOSE + HEADER_SIZE)
             except TimeoutError:
                 print("Timeout")
-                reprises += 1
-                if reprises >= MAX_REPRISES:
-                    return
                 # TODO: timeout
                 continue
             
@@ -97,19 +92,18 @@ class Server:
                 while self.expected_seq in self.received:
                     self.expected_seq += 1
                     
-                #ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq - 1)
-                ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq)
+                ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq - 1)
                 self.sock.sendto(ack_packet, address)
 
             elif packet["type"] == TYPE_FIN:
                 print("Transfère complété")
-                self.save_file(filename)
+                self.save_file()
                 return
 
 
 
-    def save_file(self, filename: str):
-        filename = os.path.join(SAVE_DIR, filename)
+    def save_file(self):
+        filename = os.path.join(SAVE_DIR, "received_file")
 
         with open(filename, "wb") as f:
             for i in sorted(self.received):
@@ -125,7 +119,6 @@ class Server:
                 try:
                     data, address = self.sock.recvfrom(CLIENT_MSS_PROPOSE + HEADER_SIZE)
                 except TimeoutError:
-                    #print("waiting...")
                     continue
                 
                 packet = parse_packet(data)
@@ -137,18 +130,14 @@ class Server:
                     cmd = packet["data"].decode()
 
                     if cmd.startswith("put"):
-                        cmd = cmd.split(' ')
-                        if len(cmd) != 2:
-                            print("La commande reçue contient le mauvais nombre de paramètres")
-                            continue
-                        self.receive_file(cmd[1])
+                        self.receive_file()
 
                     elif cmd == "ls":
                         self.ls_command(packet)
 
                 # fin ou nouvelle demande de connexion
                 # au cas ou le client crash et il faut se reconnecter
-                elif packet["type"] == TYPE_FIN or packet["type"] == TYPE_SYN:
+                elif packet["type"] == TYPE_FIN | TYPE_SYN:
                     print("Déconnexion")
                     break
 
