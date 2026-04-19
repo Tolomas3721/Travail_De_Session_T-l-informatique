@@ -23,8 +23,8 @@ SERVER_MSS_PROPOSE = int(config["CONNEXION"]["serveur_mss_propose"])
 
 SAVE_DIR = "./sauvegardes"
 
-HEADER_FMT = "!BBIIHI"
-HEADER_SIZE = struct.calcsize(HEADER_FMT)
+HEADER_FORMAT = "!BBIIHI"
+HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
 VERSION = 1
 
@@ -44,7 +44,7 @@ def checksum(data: bytes) -> int:
 def build_packet(msg_type, seq, ack, data=b""):
     data_len = len(data)
     chk = checksum(data)
-    header = struct.pack(HEADER_FMT, VERSION, msg_type, seq, ack, data_len, chk)
+    header = struct.pack(HEADER_FORMAT, VERSION, msg_type, seq, ack, data_len, chk)
     return header + data
 
 
@@ -52,7 +52,7 @@ def parse_packet(packet: bytes):
     header = packet[:HEADER_SIZE]
     data = packet[HEADER_SIZE:]
 
-    version, msg_type, seq, ack, data_len, chk = struct.unpack(HEADER_FMT, header)
+    version, msg_type, seq, ack, data_len, chk = struct.unpack(HEADER_FORMAT, header)
 
     if checksum(data) != chk:
         return None  # TODO: corrompu

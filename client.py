@@ -47,7 +47,7 @@ class Client:
     def wait_for_file(self):
         try:
             data, _ = self.sock.recvfrom(CLIENT_MSS_PROPOSE + HEADER_SIZE)
-        except Exception:
+        except TimeoutError:
             print("Échec de la connexion (Timeout)")
             return
         data = parse_packet(data)
@@ -108,7 +108,7 @@ class Client:
                 base = ack + 1
                 retries = 0
 
-        fin_packet = build_packet(TYPE_FIN, self.seq, 0)
+        fin_packet = build_packet(TYPE_FIN, self.seq, 0, data=f"{len(chunks)};{checksum(file.raw)}".encode())
         self.sock.sendto(fin_packet, self.server_address)
 
         print("Fichier envoyé")
