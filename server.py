@@ -66,7 +66,7 @@ class Server:
         print("Réception du fichier")
 
         self.expected_seq = 0
-        self.received.update((filename, {}))
+        self.received.update({filename: {}})
         
         reprises = 0
 
@@ -74,19 +74,20 @@ class Server:
             try:
                 data, address = self.sock.recvfrom(SERVER_MSS_PROPOSE + HEADER_SIZE)
             except TimeoutError:
-                print("Timeout")
+                print(f"Timeout ({reprises})")
                 reprises += 1
                 if reprises >= MAX_REPRISES:
+                    print("Échec")
                     return
-                # TODO: timeout
                 continue
             
             packet = parse_packet(data)
 
             if not packet:
-                continue  # TODO: corrompu
+                continue
 
             if packet["type"] == TYPE_DATA:
+                reprises = 0
                 seq = packet["seq"]
 
                 if seq in self.received[filename]:
@@ -94,19 +95,15 @@ class Server:
 
                 self.received[filename][seq] = packet["data"]
 
+                # reset the counter and recheck, just to be sure (im paranoid now, HELP)
+                self.expected_seq = 0
                 while self.expected_seq in self.received[filename]:
                     self.expected_seq += 1
                     
-                #ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq - 1)
-                ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq - 1)
+                ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq)
                 self.sock.sendto(ack_packet, address)
 
             elif packet["type"] == TYPE_FIN:
-                final_check = packet["data"].decode()
-                number_of_chunks, chk = final_check.split(';')
-                if number_of_chunks != self.expected_seq:
-                    print("Le fichier reçu est erroné")
-                    print(number_of_chunks, self.expected_seq)
                 print("Transfère complété")
                 self.save_file(filename)
                 self.received.pop(filename)
@@ -122,6 +119,68 @@ class Server:
                 f.write(self.received[filename][i])
 
         print(f"Fichier sauvergardé sous: {filename}")
+        
+        
+    def resume(self, filename: str):
+        if filename not in self.received.keys():
+            return
+        # we did find the file
+        for i in range(MAX_REPRISES):
+            try:
+                ack_packet = build_packet(TYPE_ACK, 0, 0)
+                self.sock.sendto(ack_packet, address)
+            except TimeoutError:
+                print(f"Timeout ({i + 1})")
+        
+        print("Réception du fichier")
+
+        self.expected_seq = 0
+        while self.expected_seq in self.received[filename]:
+            self.expected_seq += 1
+        
+        reprises = 0
+
+        while True:
+            try:
+                data, address = self.sock.recvfrom(SERVER_MSS_PROPOSE + HEADER_SIZE)
+            except TimeoutError:
+                print(f"Timeout ({reprises})")
+                reprises += 1
+                if reprises >= MAX_REPRISES:
+                    print("Échec")
+                    return
+                continue
+            
+            packet = parse_packet(data)
+
+            if not packet:
+                continue
+
+            if packet["type"] == TYPE_DATA:
+                reprises = 0
+                seq = packet["seq"]
+
+                if seq in self.received[filename]:
+                    continue
+
+                self.received[filename][seq] = packet["data"]
+
+                # reset the counter and recheck, just to be sure (im paranoid now, HELP)
+                self.expected_seq = 0
+                while self.expected_seq in self.received[filename]:
+                    self.expected_seq += 1
+                    
+                ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq)
+                self.sock.sendto(ack_packet, address)
+
+            elif packet["type"] == TYPE_FIN:
+                print("Transfère complété")
+                self.save_file(filename)
+                self.received.pop(filename)
+                print("HERE: ", self.received.keys())
+                return
+        
+        
 
     def run(self):
         while True:
@@ -148,7 +207,16 @@ class Server:
                             print("La commande reçue contient le mauvais nombre de paramètres")
                             continue
                         self.receive_file(cmd[1])
-
+                        
+                    elif cmd.startswith("resume"):
+                        cmd = cmd.split(' ')
+                        if len(cmd) != 2:
+                            print("La commande reçue contient le mauvais nombre de paramètres")
+                            continue
+                        print("WHAT THE FUCK")
+                        self.resume(cmd[1])
+                        
+                        
                     elif cmd == "ls":
                         self.ls_command(packet)
 

@@ -4,7 +4,7 @@ import zlib
 
 
 config = configparser.ConfigParser()
-config.read("Code/config.ini")
+config.read("config.ini")
 
 # TODO: mieux dutiliser getfloat ou getint, dumbass
 TIMEOUT = float(config["RESEAU"]["timeout"])
@@ -43,7 +43,9 @@ def checksum(data: bytes) -> int:
 
 def build_packet(msg_type, seq, ack, data=b""):
     data_len = len(data)
-    chk = checksum(data)
+    # weird workaround so the header is checksum-ed too
+    header_without_chk = struct.pack(HEADER_FORMAT, VERSION, msg_type, seq, ack, data_len, 0)
+    chk = checksum(header_without_chk + data)
     header = struct.pack(HEADER_FORMAT, VERSION, msg_type, seq, ack, data_len, chk)
     return header + data
 
@@ -53,9 +55,11 @@ def parse_packet(packet: bytes):
     data = packet[HEADER_SIZE:]
 
     version, msg_type, seq, ack, data_len, chk = struct.unpack(HEADER_FORMAT, header)
+    header_without_chk = struct.pack(HEADER_FORMAT, VERSION, msg_type, seq, ack, data_len, 0)
+    chk = checksum(header_without_chk + data)
 
-    if checksum(data) != chk:
-        return None  # TODO: corrompu
+    if checksum(header_without_chk + data) != chk:
+        return None
 
     return {
         "type": msg_type,
