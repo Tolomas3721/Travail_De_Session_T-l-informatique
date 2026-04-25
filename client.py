@@ -40,7 +40,7 @@ class Client:
             ack_packet = build_packet(TYPE_ACK, self.seq, res["seq"])
             self.sock.sendto(ack_packet, self.server_address)
 
-            print("Connected!")
+            print("Connecté!")
             return True
         print("Échec de la connexion")
         return False
@@ -62,7 +62,7 @@ class Client:
 
     def send_file(self, path: str):
         if not os.path.exists(path):
-            print("File not found")
+            print("Fichier introuvable")
             return
         
         _, filename = os.path.split(path)
@@ -70,13 +70,13 @@ class Client:
         packet = build_packet(TYPE_CMD, self.seq, 0, f"put {filename}".encode())
         self.sock.sendto(packet, self.server_address)
 
-        print(f"Sending {filename}")
+        print(f"envoie de \"{filename}\"")
 
         with open(path, "rb") as file:
             data = file.read()
 
         chunks = [data[i:(i + SERVER_MSS_PROPOSE)] for i in range(0, len(data), SERVER_MSS_PROPOSE)]
-        print(f"sending {len(chunks)} chunks")
+        print(f"envoie de {len(chunks)} chunks")
 
         base = 0
         retries = 0
@@ -124,7 +124,7 @@ class Client:
         
     def resume_file(self, path: str):
         if not os.path.exists(path):
-            print("File not found")
+            print("Fichier introuvable")
             return
         
         for i in range(MAX_REPRISES + 1):

@@ -173,7 +173,6 @@ class Server:
                         if len(cmd) != 2:
                             print("La commande reçue contient le mauvais nombre de paramètres")
                             continue
-                        print("WHAT THE FUCK")
                         self.resume(cmd[1])
                         
                         
