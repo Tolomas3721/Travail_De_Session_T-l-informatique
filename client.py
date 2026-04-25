@@ -129,7 +129,7 @@ class Client:
         
         for i in range(MAX_REPRISES + 1):
             if i == MAX_REPRISES:
-                print("Le fichier n'a pas été trouvé sur le serveur")
+                print("Le fichier n'a pas été trouvé sur le serveur / le serveur n'a pas pu être rejoint")
                 return
             try:
                 data, _ = self.sock.recvfrom(CLIENT_MSS_PROPOSE + HEADER_SIZE)
@@ -138,105 +138,53 @@ class Client:
                     break
             except TimeoutError:
                 print(f"Timeout ({i + 1})")
+                
+        self.send_file(path)
         
-        _, filename = os.path.split(path)
-        
-        packet = build_packet(TYPE_CMD, self.seq, 0, f"put {filename}".encode())
-        self.sock.sendto(packet, self.server_address)
+    def run(self):
+        is_connected = False
+        while True:
+            cmd = input(">> ").strip()
 
-        print(f"Sending {filename}")
-
-        with open(path, "rb") as file:
-            data = file.read()
-
-        chunks = [data[i:(i + SERVER_MSS_PROPOSE)] for i in range(0, len(data), SERVER_MSS_PROPOSE)]
-        print(f"sending {len(chunks)} chunks")
-
-        base = 0
-        retries = 0
-        
-        while base < len(chunks):
-            window = chunks[base:min(base + WINDOW_SIZE, len(chunks))]
-
-            # envoi
-            for i, chunk in enumerate(window):
-                packet = build_packet(TYPE_DATA, base + i, 0, chunk)
-                self.sock.sendto(packet, self.server_address)
-
-            # attendre ack
-            try:
-                data, _ = self.sock.recvfrom(CLIENT_MSS_PROPOSE + HEADER_SIZE)
-            except TimeoutError:
-                retries += 1
-                print(f"Timeout ({retries + 1})")
-
-                if retries >= MAX_REPRISES:
-                    print("Transfère raté")
-                    # TODO: demander de coninuer tranfère
-                    return
-                continue
+            # dumb, but make sure to have the space at the end so
+            # stuff like "putter" arent actually counted as commands
+            # only put the space when the command has a single parameter
+            if cmd.startswith("open"):
+                params = cmd.split(' ')
+                # base ip when starting the server
+                ip = "127.0.0.1"
+                if len(params) == 2:
+                    ip = params[1]
+                    
+                if self.open(ip):
+                    is_connected = True
+                    
+            elif cmd == "bye":
+                self.close()
+                break
             
-            res = parse_packet(data)
+            if not is_connected:
+                print("Vous n'êtes pas connecté au serveur! Utilisez la commande \"open\" pour vous connecter à un serveur")
+                continue
 
-            if res and res["type"] == TYPE_ACK:
-                ack = res["ack"]
-                if ack > len(chunks):
-                    print(f"ack reçu trop élevé ({ack}), on ignore")
-                    continue
-                base = ack
-                retries = 0
+            elif cmd.startswith("put "):
+                _, path = cmd.split(' ')
+                self.send_file(path)
 
-        fin_packet = build_packet(TYPE_FIN, self.seq, 0, data=f"{len(chunks)}".encode())
-        self.sock.sendto(fin_packet, self.server_address)
-
-        print("Fichier envoyé")
-
-
-def main():
-    client = Client()
-
-    is_connected = False
-    while True:
-        cmd = input(">> ").strip()
-
-        # dumb, but make sure to have the space at the end so
-        # stuff like "putter" arent actually counted as commands
-        # only put it when the command has params
-        if cmd.startswith("open "):
-            _, ip = cmd.split()
-            if client.open(ip):
-                is_connected = True
-
-        elif cmd.startswith("put "):
-            if is_connected:
+            elif cmd == "ls":
+                print(self.send_command("ls"))
+                    
+            elif cmd.startswith("resume "):
                 _, filename = cmd.split(' ')
-                client.send_file(filename)
-            else:
-                print("Vous n'êtes pas connecté au serveur!")
-
-        elif cmd == "ls":
-            if is_connected:
-                print(client.send_command("ls"))
-            else:
-                print("Vous n'êtes pas connecté au serveur!")
+                print(self.send_command(f"resume {os.path.basename(filename)}"))
                 
-        elif cmd.startswith("resume "):
-            if is_connected:
-                _, filename = cmd.split(' ')
-                print(client.send_command(f"resume {os.path.basename(filename)}"))
+                self.resume_file(filename)
                 
-                client.resume_file(filename)
             else:
-                print("Vous n'êtes pas connecté au serveur!")
+                print("commande inconnue")
 
-        elif cmd == "bye":
-            client.close()
-            break
-        
-
-        else:
-            print("commande inconnue")
 
 
 if __name__ == "__main__":
-    main()
+    client = Client()
+    client.run()

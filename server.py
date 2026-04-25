@@ -66,7 +66,8 @@ class Server:
         print("Réception du fichier")
 
         self.expected_seq = 0
-        self.received.update({filename: {}})
+        if filename not in self.received.keys():
+            self.received.update({filename: {}})
         
         reprises = 0
 
@@ -123,62 +124,21 @@ class Server:
         
     def resume(self, filename: str):
         if filename not in self.received.keys():
+            # on renvoit rien lol
+            # le client assume que le fichier n'existe pas si il a pas de reponse...
             return
         # we did find the file
-        for i in range(MAX_REPRISES):
+        for i in range(MAX_REPRISES + 1):
+            if i == MAX_REPRISES:
+                print("Le client n'a pas pu être rejoint")
+                return
             try:
                 ack_packet = build_packet(TYPE_ACK, 0, 0)
-                self.sock.sendto(ack_packet, address)
+                self.sock.sendto(ack_packet, self.client_address)
             except TimeoutError:
                 print(f"Timeout ({i + 1})")
         
-        print("Réception du fichier")
-
-        self.expected_seq = 0
-        while self.expected_seq in self.received[filename]:
-            self.expected_seq += 1
-        
-        reprises = 0
-
-        while True:
-            try:
-                data, address = self.sock.recvfrom(SERVER_MSS_PROPOSE + HEADER_SIZE)
-            except TimeoutError:
-                print(f"Timeout ({reprises})")
-                reprises += 1
-                if reprises >= MAX_REPRISES:
-                    print("Échec")
-                    return
-                continue
-            
-            packet = parse_packet(data)
-
-            if not packet:
-                continue
-
-            if packet["type"] == TYPE_DATA:
-                reprises = 0
-                seq = packet["seq"]
-
-                if seq in self.received[filename]:
-                    continue
-
-                self.received[filename][seq] = packet["data"]
-
-                # reset the counter and recheck, just to be sure (im paranoid now, HELP)
-                self.expected_seq = 0
-                while self.expected_seq in self.received[filename]:
-                    self.expected_seq += 1
-                    
-                ack_packet = build_packet(TYPE_ACK, 0, self.expected_seq)
-                self.sock.sendto(ack_packet, address)
-
-            elif packet["type"] == TYPE_FIN:
-                print("Transfère complété")
-                self.save_file(filename)
-                self.received.pop(filename)
-                print("HERE: ", self.received.keys())
-                return
+        self.receive_file(filename)
         
         
 
